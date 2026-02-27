@@ -16,7 +16,7 @@
  * (slower but works for development).
  */
 
-import { CodeInterpreter, Execution } from "@e2b/code-interpreter";
+import { Sandbox, Execution } from "@e2b/code-interpreter";
 import { getPackageList } from "./spinel-plugin";
 
 // Custom template IDs — set these after building E2B templates
@@ -25,7 +25,7 @@ const SPINEL_TEMPLATE = process.env.E2B_SPINEL_TEMPLATE || undefined;
 const VANILLA_TEMPLATE = process.env.E2B_VANILLA_TEMPLATE || undefined;
 
 // Track active sandboxes per session
-const activeSandboxes = new Map<string, CodeInterpreter>();
+const activeSandboxes = new Map<string, Sandbox>();
 
 export type SandboxMode = "vanilla" | "spinel";
 
@@ -49,7 +49,7 @@ print("Spinel packages ready")
 export async function getOrCreateSandbox(
   sessionId: string,
   mode: SandboxMode
-): Promise<CodeInterpreter> {
+): Promise<Sandbox> {
   const key = `${sessionId}-${mode}`;
 
   if (activeSandboxes.has(key)) {
@@ -58,7 +58,7 @@ export async function getOrCreateSandbox(
 
   const template = mode === "spinel" ? SPINEL_TEMPLATE : VANILLA_TEMPLATE;
 
-  const sandbox = await CodeInterpreter.create({
+  const sandbox = await Sandbox.create({
     ...(template ? { template } : {}),
     apiKey: process.env.E2B_API_KEY,
   });
@@ -66,14 +66,14 @@ export async function getOrCreateSandbox(
   // If no custom template, install packages on demand
   if (!template && mode === "spinel") {
     const installScript = await buildInstallScript();
-    await sandbox.notebook.execCell(installScript, {
+    await sandbox.runCode(installScript, {
       timeoutMs: 120_000,
     });
   }
 
   // Set MP_API_KEY in sandbox environment
   if (mode === "spinel" && process.env.MP_API_KEY) {
-    await sandbox.notebook.execCell(
+    await sandbox.runCode(
       `import os; os.environ["MP_API_KEY"] = "${process.env.MP_API_KEY}"`
     );
   }
@@ -83,7 +83,7 @@ export async function getOrCreateSandbox(
 }
 
 export async function executeCode(
-  sandbox: CodeInterpreter,
+  sandbox: Sandbox,
   code: string
 ): Promise<{
   text: string;
@@ -91,7 +91,7 @@ export async function executeCode(
   error: string | null;
 }> {
   try {
-    const execution: Execution = await sandbox.notebook.execCell(code, {
+    const execution: Execution = await sandbox.runCode(code, {
       timeoutMs: 60_000,
     });
 
@@ -114,12 +114,12 @@ export async function executeCode(
 }
 
 export async function uploadFileToSandbox(
-  sandbox: CodeInterpreter,
+  sandbox: Sandbox,
   filename: string,
   content: Buffer
 ): Promise<string> {
   const path = `/home/user/${filename}`;
-  await sandbox.files.write(path, content);
+  await sandbox.files.write(path, new Uint8Array(content).buffer as ArrayBuffer);
   return path;
 }
 
@@ -127,7 +127,7 @@ export async function closeSandbox(sessionId: string, mode: SandboxMode) {
   const key = `${sessionId}-${mode}`;
   const sandbox = activeSandboxes.get(key);
   if (sandbox) {
-    await sandbox.close();
+    await sandbox.kill();
     activeSandboxes.delete(key);
   }
 }
