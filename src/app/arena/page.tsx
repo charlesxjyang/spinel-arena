@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Send } from "lucide-react";
 import ChatPanel, { type ChatMessage, type MessageBlock } from "@/components/ChatPanel";
@@ -28,6 +28,14 @@ type ApiMessage = {
 };
 
 export default function ArenaPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-gray-500">Loading arena...</div>}>
+      <ArenaContent />
+    </Suspense>
+  );
+}
+
+function ArenaContent() {
   const searchParams = useSearchParams();
   const initialQuery = searchParams.get("q") || "";
 
