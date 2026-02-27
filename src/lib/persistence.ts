@@ -3,15 +3,19 @@
  *
  * All functions are designed to never throw — they log warnings on failure
  * so that persistence issues never block or crash the streaming response.
+ * If DATABASE_URL is not set, all operations are silently skipped.
  */
 
-import { prisma } from "./db";
+import { getPrisma } from "./db";
 import { uploadFile } from "./storage";
 
 /**
  * Upsert a session record (creates if new, touches updatedAt if existing).
  */
 export function ensureSession(sessionId: string): void {
+  const prisma = getPrisma();
+  if (!prisma) return;
+
   prisma.session
     .upsert({
       where: { id: sessionId },
@@ -31,6 +35,9 @@ export function saveUserMessage(
   mode: string,
   content: string
 ): void {
+  const prisma = getPrisma();
+  if (!prisma) return;
+
   prisma.message
     .create({
       data: { sessionId, role: "user", mode, content },
@@ -49,6 +56,9 @@ export function saveAssistantMessage(
   textContent: string,
   blocks: unknown[]
 ): void {
+  const prisma = getPrisma();
+  if (!prisma) return;
+
   prisma.message
     .create({
       data: {
@@ -72,11 +82,12 @@ export function saveUploadedFile(
   filename: string,
   base64Content: string
 ): void {
+  const prisma = getPrisma();
   const buffer = Buffer.from(base64Content, "base64");
 
   uploadFile(sessionId, filename, buffer)
     .then((s3Key) => {
-      if (!s3Key) return; // S3 not configured
+      if (!s3Key || !prisma) return;
       return prisma.upload.create({
         data: {
           sessionId,
