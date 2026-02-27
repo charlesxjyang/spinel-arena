@@ -1,0 +1,42 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Session {
+  id        String    @id // frontend sessionId
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  messages  Message[]
+  uploads   Upload[]
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   Session  @relation(fields: [sessionId], references: [id])
+  role      String   // "user" | "assistant"
+  mode      String   // "vanilla" | "spinel"
+  content   String   @db.Text
+  blocks    Json?    // structured blocks for assistant messages
+  createdAt DateTime @default(now())
+
+  @@index([sessionId])
+}
+
+model Upload {
+  id           String   @id @default(cuid())
+  sessionId    String
+  session      Session  @relation(fields: [sessionId], references: [id])
+  filename     String
+  originalName String
+  size         Int
+  mimeType     String   @default("application/octet-stream")
+  s3Key        String
+  createdAt    DateTime @default(now())
+
+  @@index([sessionId])
+}

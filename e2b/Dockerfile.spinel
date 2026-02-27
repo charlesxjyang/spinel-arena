@@ -1,0 +1,52 @@
+# E2B Custom Sandbox Template for Spinel
+# 
+# Build with:
+#   e2b template init --name spinel-sandbox
+#   # copy this Dockerfile into the template directory
+#   e2b template build
+#
+# This gives you a template ID to set as E2B_SPINEL_TEMPLATE env var.
+# Sandboxes from this template boot in ~1s with all packages ready.
+
+FROM e2b/code-interpreter:latest
+
+# Core scientific stack
+RUN pip install --no-cache-dir \
+    pymatgen>=2024.0.0 \
+    mp-api>=0.41.0 \
+    emmet-core \
+    ase>=3.22 \
+    pycalphad \
+    matgl \
+    matplotlib \
+    numpy \
+    scipy \
+    pandas
+
+# Battery / electrochemistry
+RUN pip install --no-cache-dir \
+    cellpy \
+    galvani \
+    impedance \
+    pybamm
+
+# Instrument data formats
+RUN pip install --no-cache-dir \
+    tifffile \
+    jcamp \
+    brukeropusreader \
+    spc-spectra
+
+# Electron microscopy (large install, keep separate)
+RUN pip install --no-cache-dir \
+    hyperspy \
+    kikuchipy
+
+# Diffraction
+RUN pip install --no-cache-dir \
+    diffpy.structure \
+    Dans_Diffraction
+
+# Phonons
+RUN pip install --no-cache-dir \
+    phonopy

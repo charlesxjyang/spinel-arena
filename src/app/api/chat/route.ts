@@ -17,13 +17,19 @@
 
 import { NextRequest } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { SPINEL_SYSTEM_PROMPT, VANILLA_SYSTEM_PROMPT } from "@/lib/prompts";
+import { getSpinelSystemPrompt, VANILLA_SYSTEM_PROMPT } from "@/lib/prompts";
 import {
   getOrCreateSandbox,
   executeCode,
   uploadFileToSandbox,
   type SandboxMode,
 } from "@/lib/sandbox";
+import {
+  ensureSession,
+  saveUserMessage,
+  saveAssistantMessage,
+  saveUploadedFile,
+} from "@/lib/persistence";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -60,6 +66,14 @@ export async function POST(request: NextRequest) {
       files?: { name: string; content: string }[];
     } = body;
 
+    // Persist session and uploaded files (fire-and-forget)
+    ensureSession(sessionId);
+    if (files && files.length > 0) {
+      for (const file of files) {
+        saveUploadedFile(sessionId, file.name, file.content);
+      }
+    }
+
     // Get or create sandbox
     const sandbox = await getOrCreateSandbox(sessionId, mode);
 
@@ -72,7 +86,24 @@ export async function POST(request: NextRequest) {
     }
 
     const systemPrompt =
-      mode === "spinel" ? SPINEL_SYSTEM_PROMPT : VANILLA_SYSTEM_PROMPT;
+      mode === "spinel" ? await getSpinelSystemPrompt() : VANILLA_SYSTEM_PROMPT;
+
+    // Save user message (fire-and-forget) — extract text from last message
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage?.role === "user") {
+      const userText =
+        typeof lastMessage.content === "string"
+          ? lastMessage.content
+          : Array.isArray(lastMessage.content)
+            ? lastMessage.content
+                .filter((b: any) => b.type === "text")
+                .map((b: any) => b.text)
+                .join("\n")
+            : "";
+      if (userText) {
+        saveUserMessage(sessionId, mode, userText);
+      }
+    }
 
     // Create streaming encoder
     const encoder = new TextEncoder();
@@ -82,6 +113,7 @@ export async function POST(request: NextRequest) {
           // Agentic loop: keep going until Claude stops calling tools
           let currentMessages = [...messages];
           let maxIterations = 10; // safety limit
+          const allStreamedBlocks: unknown[] = [];
 
           while (maxIterations-- > 0) {
             const response = await anthropic.messages.create({
@@ -100,6 +132,7 @@ export async function POST(request: NextRequest) {
               assistantContent.push(block);
 
               if (block.type === "text") {
+                allStreamedBlocks.push({ type: "text", content: block.text });
                 // Stream text to frontend
                 controller.enqueue(
                   encoder.encode(
@@ -109,6 +142,7 @@ export async function POST(request: NextRequest) {
               } else if (block.type === "tool_use") {
                 hasToolUse = true;
                 const code = (block.input as { code: string }).code;
+                allStreamedBlocks.push({ type: "code", content: code });
 
                 // Stream the code block to frontend
                 controller.enqueue(
@@ -122,6 +156,7 @@ export async function POST(request: NextRequest) {
 
                 // Stream execution results
                 if (result.text) {
+                  allStreamedBlocks.push({ type: "output", content: result.text });
                   controller.enqueue(
                     encoder.encode(
                       `data: ${JSON.stringify({ type: "output", content: result.text })}\n\n`
@@ -129,6 +164,7 @@ export async function POST(request: NextRequest) {
                   );
                 }
                 if (result.error) {
+                  allStreamedBlocks.push({ type: "error", content: result.error });
                   controller.enqueue(
                     encoder.encode(
                       `data: ${JSON.stringify({ type: "error", content: result.error })}\n\n`
@@ -136,6 +172,7 @@ export async function POST(request: NextRequest) {
                   );
                 }
                 for (const img of result.images) {
+                  allStreamedBlocks.push({ type: "image", content: "[base64]" });
                   controller.enqueue(
                     encoder.encode(
                       `data: ${JSON.stringify({ type: "image", content: img })}\n\n`
@@ -176,6 +213,15 @@ export async function POST(request: NextRequest) {
             if (!hasToolUse) {
               break;
             }
+          }
+
+          // Save assistant message (fire-and-forget)
+          const textContent = allStreamedBlocks
+            .filter((b: any) => b.type === "text")
+            .map((b: any) => b.content)
+            .join("\n");
+          if (textContent || allStreamedBlocks.length > 0) {
+            saveAssistantMessage(sessionId, mode, textContent, allStreamedBlocks);
           }
 
           controller.enqueue(

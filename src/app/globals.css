@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f8f9fa;
+  --foreground: #1a1a1a;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+
+/* Scrollbar styling for chat panels */
+.chat-panel::-webkit-scrollbar {
+  width: 6px;
+}
+.chat-panel::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-panel::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 3px;
+}
+
+/* Code blocks in responses */
+.prose pre {
+  background: #f1f5f9;
+  border-radius: 8px;
+  padding: 1rem;
+  overflow-x: auto;
+  font-size: 0.85rem;
+}
+.prose code {
+  color: #334155;
+  font-size: 0.85rem;
+}
+
+/* Markdown rendering */
+.prose p { margin-bottom: 0.75rem; }
+.prose ul, .prose ol { margin-left: 1.5rem; margin-bottom: 0.75rem; }
+.prose li { margin-bottom: 0.25rem; }
+.prose h1, .prose h2, .prose h3 { margin-top: 1rem; margin-bottom: 0.5rem; font-weight: 600; }

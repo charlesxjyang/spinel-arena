@@ -17,6 +17,7 @@
  */
 
 import { CodeInterpreter, Execution } from "@e2b/code-interpreter";
+import { getPackageList } from "./spinel-plugin";
 
 // Custom template IDs — set these after building E2B templates
 // For now, we use the default Python template and install on demand
@@ -28,20 +29,22 @@ const activeSandboxes = new Map<string, CodeInterpreter>();
 
 export type SandboxMode = "vanilla" | "spinel";
 
-const SPINEL_INSTALL_SCRIPT = `
+async function buildInstallScript(): Promise<string> {
+  const packages = await getPackageList();
+  const packageList = packages.map((p) => `    "${p}"`).join(",\n");
+  return `
 import subprocess, sys
 packages = [
-    "pymatgen", "mp-api", "ase", "pycalphad",
-    "matgl", "cellpy", "galvani", "impedance",
-    "tifffile", "jcamp", "brukeropusreader",
+${packageList},
 ]
 for pkg in packages:
     try:
-        __import__(pkg.replace("-", "_"))
+        __import__(pkg.replace("-", "_").replace(".", "_"))
     except ImportError:
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", pkg])
 print("Spinel packages ready")
 `;
+}
 
 export async function getOrCreateSandbox(
   sessionId: string,
@@ -62,7 +65,8 @@ export async function getOrCreateSandbox(
 
   // If no custom template, install packages on demand
   if (!template && mode === "spinel") {
-    await sandbox.notebook.execCell(SPINEL_INSTALL_SCRIPT, {
+    const installScript = await buildInstallScript();
+    await sandbox.notebook.execCell(installScript, {
       timeoutMs: 120_000,
     });
   }

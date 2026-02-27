@@ -177,11 +177,11 @@ export default function ArenaPage() {
   return (
     <div className="h-screen flex flex-col">
       {/* Header */}
-      <header className="px-6 py-3 border-b border-gray-800 flex items-center justify-between">
-        <a href="/" className="text-white font-semibold">
+      <header className="px-6 py-3 border-b border-gray-200 flex items-center justify-between">
+        <a href="/" className="text-gray-900 font-semibold">
           Spinel Arena
         </a>
-        <span className="text-xs text-gray-600">
+        <span className="text-xs text-gray-400">
           Same model · Same data · Different expertise
         </span>
       </header>
@@ -216,12 +216,12 @@ export default function ArenaPage() {
               onKeyDown={handleKeyDown}
               placeholder="Ask about materials, upload data files, or try an example from the home page..."
               rows={2}
-              className="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-sm text-gray-200 placeholder-gray-600 resize-none focus:outline-none focus:border-gray-500"
+              className="flex-1 bg-white border border-gray-300 rounded-xl px-4 py-3 text-sm text-gray-800 placeholder-gray-400 resize-none focus:outline-none focus:border-gray-400"
             />
             <button
               type="submit"
               disabled={vanillaLoading || spinelLoading || !input.trim()}
-              className="px-4 rounded-xl bg-spinel-600 hover:bg-spinel-700 disabled:bg-gray-800 disabled:text-gray-600 text-white transition-colors flex items-center"
+              className="px-4 rounded-xl bg-spinel-600 hover:bg-spinel-700 disabled:bg-gray-200 disabled:text-gray-400 text-white transition-colors flex items-center"
             >
               <Send size={18} />
             </button>

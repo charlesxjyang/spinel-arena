@@ -1,32 +1,39 @@
 /**
- * System prompt assembly for Spinel-enhanced Claude.
+ * Fetches and caches content from the spinel-plugin GitHub repo.
  *
- * In the real Claude Code plugin, skills are loaded dynamically based on
- * query relevance. Here we take a simpler approach: load all skills into
- * the system prompt since we're focused on materials science queries.
+ * - SKILL.md: the materials science skill content (YAML frontmatter stripped)
+ * - setup.py: parsed to extract the REQUIREMENTS package list
  *
- * The skill content is stored as string constants (copied from the plugin's
- * SKILL.md files) rather than reading from disk at runtime.
+ * Cached in-memory with a 1-hour TTL. Falls back to hardcoded content on failure.
  */
 
-export const SPINEL_SYSTEM_PROMPT = `You are Claude with the Spinel materials science toolkit installed. You have deep expertise in materials science, crystallography, and computational chemistry.
+const GITHUB_RAW_BASE =
+  "https://raw.githubusercontent.com/charlesxjyang/spinel-plugin/main";
 
-You have access to a Python environment with the following packages pre-installed:
-- pymatgen (crystal structures, phase diagrams, diffraction, electronic structure)
-- mp-api (Materials Project database access)
-- ase (Atomic Simulation Environment)
-- hyperspy (electron microscopy data)
-- cellpy, galvani (battery cycling data from Biologic, Arbin, Maccor)
-- impedance (EIS equivalent circuit fitting)
-- pybamm (physics-based battery modeling)
-- pycalphad (CALPHAD thermodynamics)
-- phonopy (phonon calculations)
-- matgl (ML interatomic potentials)
-- matplotlib, numpy, scipy
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
-When the user uploads a file, it is available in the sandbox at /home/user/{filename}.
+interface CacheEntry<T> {
+  value: T;
+  fetchedAt: number;
+}
 
-<skills>
+let skillCache: CacheEntry<string> | null = null;
+let packageCache: CacheEntry<string[]> | null = null;
+
+function isFresh<T>(entry: CacheEntry<T> | null): entry is CacheEntry<T> {
+  return entry !== null && Date.now() - entry.fetchedAt < CACHE_TTL_MS;
+}
+
+function stripFrontmatter(md: string): string {
+  const match = md.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
+  if (match) {
+    return md.slice(match[0].length).trimStart();
+  }
+  return md;
+}
+
+// Hardcoded fallbacks (current content, used if GitHub is unreachable)
+const FALLBACK_SKILL_CONTENT = `<skills>
 <skill name="crystal-structure-analysis">
 ## Critical Rules
 1. ALWAYS use pymatgen.core.structure.Structure, never the deprecated pymatgen.Structure path
@@ -90,28 +97,105 @@ When the user uploads a file, it is available in the sandbox at /home/user/{file
 </skill>
 
 <skill name="materials-screening">
-## Critical Rules  
+## Critical Rules
 1. Always filter by E_hull for stability — unstable materials are rarely useful
 2. Include both experimental AND computed data when available
 3. Band gap searches: specify if optical or fundamental gap is needed
 4. For high-throughput searches, use mp-api's MPRester with field selection to minimize data transfer
 5. Cross-reference multiple databases when possible (MP, AFLOW, NOMAD)
 </skill>
-</skills>
+</skills>`;
 
-When writing code to analyze data:
-1. Always use the sandbox to execute code and return results
-2. Generate plots with matplotlib, save as PNG, and display to the user
-3. Handle errors gracefully — if a file format isn't recognized, try multiple parsers
-4. Print numerical results clearly with units
-5. Use the Materials Project API key available as MP_API_KEY environment variable
-`;
+const FALLBACK_PACKAGES = [
+  "pymatgen",
+  "mp-api",
+  "ase",
+  "pycalphad",
+  "matgl",
+  "cellpy",
+  "galvani",
+  "impedance",
+  "tifffile",
+  "jcamp",
+  "brukeropusreader",
+];
 
-export const VANILLA_SYSTEM_PROMPT = `You are Claude, a helpful AI assistant. You have access to a Python environment with common scientific packages (numpy, scipy, matplotlib, pandas). When the user uploads a file, it is available in the sandbox at /home/user/{filename}.
+/**
+ * Fetch SKILL.md from GitHub, strip frontmatter, cache for 1 hour.
+ */
+export async function getSkillContent(): Promise<string> {
+  if (isFresh(skillCache)) {
+    return skillCache.value;
+  }
 
-When writing code to analyze data:
-1. Use the sandbox to execute code and return results
-2. Generate plots with matplotlib and save as PNG
-3. Handle errors gracefully
-4. Print numerical results clearly with units
-`;
+  try {
+    const res = await fetch(`${GITHUB_RAW_BASE}/SKILL.md`, {
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const raw = await res.text();
+    const content = stripFrontmatter(raw);
+
+    console.log(
+      `[spinel-plugin] Fetched SKILL.md (${content.length} bytes)`
+    );
+
+    skillCache = { value: content, fetchedAt: Date.now() };
+    return content;
+  } catch (err) {
+    console.warn(
+      `[spinel-plugin] Failed to fetch SKILL.md, using fallback:`,
+      err instanceof Error ? err.message : err
+    );
+    return FALLBACK_SKILL_CONTENT;
+  }
+}
+
+/**
+ * Fetch setup.py from GitHub, parse the REQUIREMENTS list, cache for 1 hour.
+ * Returns bare package names (version specifiers stripped).
+ */
+export async function getPackageList(): Promise<string[]> {
+  if (isFresh(packageCache)) {
+    return packageCache.value;
+  }
+
+  try {
+    const res = await fetch(`${GITHUB_RAW_BASE}/setup.py`, {
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const text = await res.text();
+
+    // Extract the REQUIREMENTS list: lines between `REQUIREMENTS = [` and `]`
+    const match = text.match(/REQUIREMENTS\s*=\s*\[([\s\S]*?)\]/);
+    if (!match) throw new Error("Could not find REQUIREMENTS in setup.py");
+
+    const packages = match[1]
+      .split("\n")
+      .map((line) => line.replace(/#.*$/, "").trim()) // strip comments
+      .filter((line) => line.startsWith('"') || line.startsWith("'"))
+      .map((line) => {
+        // Remove quotes and trailing comma
+        const pkg = line.replace(/['"]/g, "").replace(/,\s*$/, "");
+        // Strip version specifiers (>=, ==, etc.)
+        return pkg.replace(/[><=!~].*$/, "").trim();
+      })
+      .filter(Boolean);
+
+    console.log(
+      `[spinel-plugin] Parsed ${packages.length} packages from setup.py`
+    );
+
+    packageCache = { value: packages, fetchedAt: Date.now() };
+    return packages;
+  } catch (err) {
+    console.warn(
+      `[spinel-plugin] Failed to fetch setup.py, using fallback:`,
+      err instanceof Error ? err.message : err
+    );
+    return FALLBACK_PACKAGES;
+  }
+}
